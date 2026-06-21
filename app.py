@@ -5,6 +5,7 @@ import glob
 import plotly.express as px
 import plotly.graph_objects as go
 import time
+import google.generativeai as genai
 
 # --- CONFIGURAÇÃO DE RESPONSIVIDADE TOTAL ---
 st.set_page_config(page_title="Centro de Comando - Chocadeira", layout="wide", page_icon="📈")
@@ -31,16 +32,11 @@ def carregar_dados():
     
     for arq in arquivos:
         nome_min = arq.lower()
-        
-        # 1. SHOPEE AFILIADOS
         if "affiliate" in nome_min or "shopee" in nome_min:
             try:
                 df_temp = pd.read_csv(arq)
-                if "Comissão líquida do afiliado(R$)" in df_temp.columns:
-                    listas["shopee"].append(df_temp)
+                if "Comissão líquida do afiliado(R$)" in df_temp.columns: listas["shopee"].append(df_temp)
             except: pass
-        
-        # 2. ADMOB (Múltiplas codificações)
         elif "admob" in nome_min or "ganhos" in nome_min:
             sucesso = False
             for codificacao in ['utf-8', 'utf-16', 'latin-1', 'cp1252']:
@@ -54,31 +50,21 @@ def carregar_dados():
                             break
                     except: pass
                 if sucesso: break
-                
-        # 3. PLAY STORE
         elif "todos os países" in nome_min or "origens de tráfego" in nome_min:
             try:
                 df_temp = pd.read_csv(arq)
                 cols = " ".join(df_temp.columns).lower()
-                if "aquisição" in cols and "todos os eventos" in cols:
-                    listas["play_installs"].append(df_temp)
-                elif "perda" in cols:
-                    listas["play_uninstalls"].append(df_temp)
-                elif "origens de tráfego" in cols:
-                    listas["play_traffic"].append(df_temp)
+                if "aquisição" in cols and "todos os eventos" in cols: listas["play_installs"].append(df_temp)
+                elif "perda" in cols: listas["play_uninstalls"].append(df_temp)
+                elif "origens de tráfego" in cols: listas["play_traffic"].append(df_temp)
             except: pass
-                
-        # 4. APP EVENTS
         elif "análise" not in nome_min:
             try:
                 df_temp = pd.read_csv(arq)
-                if 'event_name' in df_temp.columns:
-                    listas["app_events"].append(df_temp)
+                if 'event_name' in df_temp.columns: listas["app_events"].append(df_temp)
             except: pass
 
     # --- PROCESSAMENTO E SANITIZAÇÃO ---
-    
-    # 🐣 App Events
     if listas["app_events"]:
         df_app = pd.concat(listas["app_events"], ignore_index=True)
         df_app = df_app.drop_duplicates(subset=['timestamp', 'user_id', 'session_id', 'event_name'], keep='last')
@@ -90,7 +76,6 @@ def carregar_dados():
         df_app['timestamp'] = pd.to_datetime(df_app['timestamp'])
         df_app['data_curta'] = df_app['timestamp'].dt.date
         df_app['hora'] = df_app['timestamp'].dt.hour
-        
         dias_pt = {0: 'Segunda', 1: 'Terça', 2: 'Quarta', 3: 'Quinta', 4: 'Sexta', 5: 'Sábado', 6: 'Domingo'}
         df_app['dia_semana'] = df_app['timestamp'].dt.dayofweek.map(dias_pt)
         df_app['dia_semana'] = pd.Categorical(df_app['dia_semana'], categories=list(dias_pt.values()), ordered=True)
@@ -98,7 +83,6 @@ def carregar_dados():
         df_app['chocadeira_nome_raw'] = df_app['string_props'].apply(lambda x: extrair(x, 'chocadeira_nome'))
         df_app['especie_ave'] = df_app['string_props'].apply(lambda x: extrair(x, 'especie_ave'))
         df_app['is_premium_bool'] = df_app['string_props'].apply(lambda x: str(extrair(x, 'usuario_premium')).lower() == 'sim')
-        
         df_app['taxa_eclosao'] = pd.to_numeric(df_app['numeric_props'].apply(lambda x: extrair(x, 'taxa_eclosao_percentual')), errors='coerce')
         df_app.loc[(df_app['taxa_eclosao'] < 0) | (df_app['taxa_eclosao'] > 100), 'taxa_eclosao'] = None
         
@@ -121,14 +105,12 @@ def carregar_dados():
         df_app['chocadeira_limpa_ranking'] = df_app['chocadeira_nome_raw'].apply(limpar_nome_ranking)
         dados["app_events"] = df_app
 
-    # 🚀 Play Store
     for key in ["play_installs", "play_uninstalls", "play_traffic"]:
         if listas[key]:
             df_ps = pd.concat(listas[key], ignore_index=True)
             df_ps = df_ps.drop_duplicates(subset=['Data'], keep='last')
             dados[key] = df_ps
 
-    # 💰 AdMob
     if listas["admob"]:
         df_ad = pd.concat(listas["admob"], ignore_index=True)
         df_ad = df_ad.dropna(how='all').drop_duplicates()
@@ -137,7 +119,6 @@ def carregar_dados():
             df_ad[col] = pd.to_numeric(df_ad[col].astype(str).str.replace(',', '.'), errors='coerce')
         dados["admob"] = df_ad
 
-    # 🛍️ Shopee Afiliados
     if listas["shopee"]:
         df_sh = pd.concat(listas["shopee"], ignore_index=True)
         df_sh = df_sh.drop_duplicates(subset=['ID do pedido', 'ID do item'], keep='last')
@@ -162,17 +143,21 @@ if df_app.empty:
 else:
     notificar_atualizacao()
 
-# --- BARRA LATERAL ---
+# --- BARRA LATERAL (COM IA E FILTROS) ---
 st.sidebar.image("https://cdn-icons-png.flaticon.com/512/1004/1004186.png", width=60)
 st.sidebar.title("Comandos")
 
-if st.sidebar.button("🔄 Atualizar Fontes (Real-Time)", use_container_width=True):
+if st.sidebar.button("🔄 Atualizar Fontes", use_container_width=True):
     st.rerun()
 
 st.sidebar.markdown("---")
+st.sidebar.title("🧠 Inteligência Artificial")
+api_key_gemini = st.sidebar.text_input("Chave API do Google Gemini:", type="password", help="Obtenha a sua chave gratuita no Google AI Studio")
+
+st.sidebar.markdown("---")
+st.sidebar.title("⚙️ Filtros Globais")
 min_date, max_date = df_app['timestamp'].min().date(), df_app['timestamp'].max().date()
 date_range = st.sidebar.date_input("Período Analisado (Eventos)", [min_date, max_date])
-
 eventos = st.sidebar.multiselect("🎯 Filtrar Evento(s)", df_app['event_name'].dropna().unique(), default=[])
 estados = st.sidebar.multiselect("📍 Filtrar por Estado", df_app['region_name'].dropna().sort_values().unique())
 
@@ -192,15 +177,12 @@ tab1, tab2, tab3, tab4 = st.tabs([
 ])
 
 # ==========================================
-# TAB 1: PRODUTO E ENGAJAMENTO (MÁXIMA FORÇA RESTAURADA)
+# TAB 1: PRODUTO E ENGAJAMENTO
 # ==========================================
 with tab1:
     st.header("Análise Avançada de Produto e Comportamento")
     
-    # --- INDICADORES PRINCIPAIS ---
-    st.markdown("### 🎯 Métricas Principais")
     kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
-    
     total_users = df_app['user_id'].nunique()
     assinantes = df_app[df_app['is_premium_bool'] == 1]['user_id'].nunique()
     taxa_prem = (assinantes / total_users * 100) if total_users > 0 else 0
@@ -217,50 +199,52 @@ with tab1:
     kpi4.metric("Duração Sessão ⏱️", f"{media_sessao:.1f} min" if pd.notna(media_sessao) else "N/A")
     kpi5.metric("Pico de Acesso", f"{hora_pico}h")
 
-    # --- INDICADORES SECUNDÁRIOS ---
-    st.markdown("### 🚀 Engajamento e Saúde")
-    kpi6, kpi7, kpi8, kpi9 = st.columns(4)
-    cliques_afiliado = len(df_app[df_app['event_name'] == 'clique_afiliado'])
-    limite_atingido = len(df_app[df_app['event_name'] == 'bloqueio_add_chocadeira_limit'])
-    compartilhamentos = len(df_app[df_app['event_name'] == 'compartilhou_detalhes'])
-    crashes = len(df_app[df_app['event_name'] == 'ApplicationCrash'])
-    taxa_crash = (crashes / len(df_app) * 100) if len(df_app) > 0 else 0
-    
-    kpi6.metric("Cliques Afiliado (🛒)", cliques_afiliado)
-    kpi7.metric("Bloqueios Limite Grátis (🔥)", limite_atingido)
-    kpi8.metric("Compartilhamentos (🔗)", compartilhamentos)
-    kpi9.metric("Taxa de Crash (🐛)", f"{taxa_crash:.2f}%", delta_color="inverse")
-
+    # --- NOVO: MOTOR DE CIÊNCIA DE DADOS COM IA (GEMINI) ---
     st.markdown("---")
+    st.header("🤖 Cientista de Dados Virtual (IA)")
     
-    # --- MOTOR DE DECISÃO ---
-    st.header("🧠 Relatório de Tomada de Decisão")
-    if not df_app.empty:
-        dia_pico = df_app['dia_semana'].value_counts().idxmax()
-        with st.expander("💡 Diretrizes Estratégicas Baseadas em Ciência de Dados", expanded=True):
-            st.markdown(f"""
-            * **Janela Óptima de Notificações:** O tráfego consolida-se às **{hora_pico}h**, tendo a **{dia_pico}** como dia principal de atividade. *Ação:* Configure disparos automáticos de push-marketing para 15 minutos antes deste horário.
-            * **Friction de Onboarding e Sessão:** O tempo útil de ecrã ronda os **{media_sessao:.1f} minutos**. *Ação:* Os criadores buscam agilidade. Mantenha os dados essenciais (temperatura, umidade, contagem regressiva) no ecrã inicial sem necessidade de cliques extra.
-            * **Monetização Convertedora:** Registamos **{limite_atingido} batidas no limite de uso gratuito**. *Ação:* Este é o seu maior poço de conversão. Dispare um pop-up de oferta com 20% de desconto válido por apenas 1 hora imediatamente após o utilizador atingir este limite.
-            """)
+    # Prepara os dados para enviar para a IA
+    receita_admob = dados["admob"]['Ganhos estimados (USD)'].sum() if not dados["admob"].empty else 0
+    vendas_shopee = dados["shopee"]['Comissão líquida do afiliado(R$)'].sum() if not dados["shopee"].empty else 0
+    
+    pacote_dados_ia = f"""
+    - Usuários Ativos: {total_users}
+    - Taxa Média de Eclosão: {media_geral_eclosao:.1f}%
+    - Tempo Médio de Uso Diário: {media_sessao:.1f} minutos
+    - Conversão Premium: {taxa_prem:.1f}%
+    - Faturamento AdMob: ${receita_admob:.2f} USD
+    - Faturamento Shopee Afiliados: R$ {vendas_shopee:.2f}
+    - Hora de Pico: {hora_pico}h
+    """
 
-    st.markdown("---")
-
-    # --- BUSCA AVANÇADA DE TERMOS ---
-    st.subheader("🔍 Busca Avançada de Termos Digitados")
-    termo_busca = st.text_input("Pesquise nomes informados manualmente para auditar variações ou testes (Ex: teste, caseira, inchoc):", "")
-    if termo_busca:
-        df_busca = df_original[df_original['chocadeira_nome_raw'].str.contains(termo_busca, case=False, na=False)]
-        st.subheader(f"📋 Registos Encontrados para '{termo_busca}' ({len(df_busca)} linhas)")
-        if not df_busca.empty:
-            st.dataframe(df_busca[['timestamp', 'event_name', 'region_name', 'chocadeira_nome_raw', 'especie_ave', 'taxa_eclosao']].head(100), use_container_width=True)
+    if st.button("🧠 Gerar Relatório de Decisões com IA", type="primary"):
+        if not api_key_gemini:
+            st.error("⚠️ Por favor, insira a sua Chave API do Google Gemini na barra lateral primeiro.")
         else:
-            st.info("Nenhuma variação encontrada.")
+            with st.spinner('A IA está a analisar os seus dados cruzados de Aplicação, Play Store, AdMob e Shopee...'):
+                try:
+                    genai.configure(api_key=api_key_gemini)
+                    model = genai.GenerativeModel('gemini-1.5-flash')
+                    prompt = f"""Atue como um Analista de Dados e Especialista em Crescimento de Aplicativos.
+                    Analise os dados reais da aplicação 'Chocadeira Eficiente' (nicho de agricultura/pecuária):
+                    {pacote_dados_ia}
+                    
+                    Escreva um relatório curto, direto ao ponto, estruturado em Markdown com 3 seções:
+                    1. 🚨 **Diagnóstico Principal:** O que estes números dizem sobre a saúde do app.
+                    2. 💡 **Oportunidade de Receita:** Uma recomendação prática cruzando AdMob/Shopee com o uso.
+                    3. 📈 **Ação Imediata (Produto):** Uma melhoria sugerida para retenção baseada no tempo de sessão ou conversão premium.
+                    Fale diretamente com o criador do app num tom encorajador e profissional.
+                    """
+                    resposta_ia = model.generate_content(prompt)
+                    st.success("Análise concluída!")
+                    st.markdown(resposta_ia.text)
+                except Exception as e:
+                    st.error(f"Erro ao comunicar com a IA: {e}")
 
     st.markdown("---")
-
-    # --- CLASSIFICAÇÃO TOP 15 E GRÁFICO DE MARCAS ---
-    st.subheader("🏆 Classificação Geral de Modelos e Participação")
+    
+    # --- GRÁFICOS BLINDADOS (TRY/EXCEPT) ---
+    st.subheader("🏆 Classificação e Marcas")
     col_rank1, col_rank2 = st.columns([2, 1])
     with col_rank1:
         contagem_uso = df_app['chocadeira_limpa_ranking'].value_counts().reset_index()
@@ -269,63 +253,46 @@ with tab1:
         medias_eclosao_raw = df_fin_raw.groupby('chocadeira_limpa_ranking')['taxa_eclosao'].mean().reset_index()
         medias_eclosao_raw.columns = ['Modelo Específico', 'Taxa Média de Eclosão (%)']
         ranking_completo = pd.merge(contagem_uso, medias_eclosao_raw, on='Modelo Específico', how='left').head(15)
-        
-        st.markdown("**Top 15 Chocadeiras (Clique nos cabeçalhos para ordenar ↕️):**")
-        st.dataframe(
-            ranking_completo,
-            column_config={"Taxa Média de Eclosão (%)": st.column_config.NumberColumn(format="%.1f%%")},
-            use_container_width=True, hide_index=True
-        )
+        st.dataframe(ranking_completo, column_config={"Taxa Média de Eclosão (%)": st.column_config.NumberColumn(format="%.1f%%")}, use_container_width=True, hide_index=True)
         
     with col_rank2:
-        st.markdown("**📊 Participação de Mercado**")
-        df_choc_pie = df_app[df_app['chocadeira_padronizada'] != 'Não Informada']['chocadeira_padronizada'].value_counts().reset_index()
-        df_choc_pie.columns = ['Modelo', 'Quantidade']
-        fig_pizza = px.pie(df_choc_pie, names='Modelo', values='Quantidade', hole=0.4, template="plotly_white")
-        st.plotly_chart(fig_pizza, use_container_width=True)
+        try:
+            df_choc_pie = df_app[df_app['chocadeira_padronizada'] != 'Não Informada']['chocadeira_padronizada'].value_counts().reset_index()
+            df_choc_pie.columns = ['Modelo', 'Quantidade']
+            if not df_choc_pie.empty:
+                fig_pizza = px.pie(df_choc_pie, names='Modelo', values='Quantidade', hole=0.4, template="plotly_white")
+                st.plotly_chart(fig_pizza, use_container_width=True)
+            else:
+                st.info("Sem dados suficientes para o gráfico de pizza.")
+        except: st.info("Filtro atual bloqueou a renderização deste gráfico.")
 
     st.markdown("---")
-
-    # --- OS 4 GRÁFICOS VISUAIS RESTAURADOS ---
     st.subheader("Visualizações Gráficas Complementares")
     col_g1, col_g2 = st.columns(2)
     
     with col_g1:
         st.markdown("**📅 Evolução de Acessos no Tempo**")
-        df_tempo = df_app.groupby(['data_curta']).size().reset_index(name='Eventos')
-        fig_linha = px.line(df_tempo, x='data_curta', y='Eventos', markers=True, template="plotly_white")
-        fig_linha.update_traces(line_color="#1f77b4")
-        st.plotly_chart(fig_linha, use_container_width=True)
+        try:
+            df_tempo = df_app.groupby(['data_curta']).size().reset_index(name='Eventos')
+            if not df_tempo.empty:
+                fig_linha = px.line(df_tempo, x='data_curta', y='Eventos', markers=True, template="plotly_white")
+                st.plotly_chart(fig_linha, use_container_width=True)
+            else: st.info("Sem dados temporais.")
+        except: pass
         
     with col_g2:
-        st.markdown("**🏆 Desempenho por Marca Unificada (Taxa Real)**")
-        if not df_eclosao.empty:
-            df_agrupado = df_eclosao.groupby('chocadeira_padronizada', as_index=False)['taxa_eclosao'].mean()
-            df_agrupado = df_agrupado[df_agrupado['chocadeira_padronizada'] != 'Não Informada'].sort_values('taxa_eclosao', ascending=False)
-            df_agrupado['taxa_txt'] = df_agrupado['taxa_eclosao'].apply(lambda x: f"{x:.1f}%")
-            fig_bar = px.bar(df_agrupado, x='chocadeira_padronizada', y='taxa_eclosao', text='taxa_txt', color='chocadeira_padronizada', template='plotly_white')
-            fig_bar.update_layout(showlegend=False, xaxis_title="Modelo Unificado", yaxis_title="% Média Eclosão", xaxis={'categoryorder':'total descending'})
-            st.plotly_chart(fig_bar, use_container_width=True)
-        else:
-            st.info("Sem dados de eclosão válidos.")
-
-    col_g3, col_g4 = st.columns(2)
-    
-    with col_g3:
-        st.markdown("**🔥 Mapa de Calor: Horários e Dias de Tráfego**")
-        if not df_app.empty:
-            heatmap_data = df_app.groupby(['dia_semana', 'hora']).size().reset_index(name='Acessos')
-            fig_heat = px.density_heatmap(heatmap_data, x="hora", y="dia_semana", z="Acessos", color_continuous_scale="Viridis", text_auto=True)
-            fig_heat.update_layout(xaxis_title="Hora do Dia (0-23h)", yaxis_title="")
-            st.plotly_chart(fig_heat, use_container_width=True)
-            
-    with col_g4:
-        st.markdown("**🐔 Espécies Mais Frequentes**")
-        df_aves = df_app['especie_ave'].dropna().value_counts().reset_index().head(6)
-        df_aves.columns = ['Espécie', 'Quantidade']
-        fig_aves = px.bar(df_aves, x='Espécie', y='Quantidade', color='Espécie', template="plotly_white")
-        fig_aves.update_layout(showlegend=False)
-        st.plotly_chart(fig_aves, use_container_width=True)
+        st.markdown("**🏆 Desempenho por Marca Unificada**")
+        try:
+            if not df_eclosao.empty:
+                df_agrupado = df_eclosao.groupby('chocadeira_padronizada', as_index=False)['taxa_eclosao'].mean()
+                df_agrupado = df_agrupado[df_agrupado['chocadeira_padronizada'] != 'Não Informada'].sort_values('taxa_eclosao', ascending=False)
+                if not df_agrupado.empty:
+                    df_agrupado['taxa_txt'] = df_agrupado['taxa_eclosao'].apply(lambda x: f"{x:.1f}%")
+                    fig_bar = px.bar(df_agrupado, x='chocadeira_padronizada', y='taxa_eclosao', text='taxa_txt', color='chocadeira_padronizada', template='plotly_white')
+                    st.plotly_chart(fig_bar, use_container_width=True)
+                else: st.info("Sem marcas unificadas para eclosão.")
+            else: st.info("Filtre o evento finalizou_incubacao.")
+        except: pass
 
 # ==========================================
 # TAB 2: AQUISIÇÃO E PLAY STORE
@@ -338,18 +305,19 @@ with tab2:
         df_in, df_out = dados["play_installs"], dados["play_uninstalls"]
         col_in_br = [c for c in df_in.columns if "Brasil" in c][0]
         col_out_br = [c for c in df_out.columns if "Brasil" in c][0]
-        
         k1, k2, k3 = st.columns(3)
         k1.metric("⬇ Novas Instalações", int(df_in[col_in_br].sum()))
         k2.metric("🗑 Desinstalações", int(df_out[col_out_br].sum()))
         k3.metric("🚀 Crescimento Líquido", int(df_in[col_in_br].sum() - df_out[col_out_br].sum()))
         
-        df_in['Data_Limpa'] = df_in['Data'].str.split(',').str[0]
-        fig_balanco = go.Figure()
-        fig_balanco.add_trace(go.Bar(x=df_in['Data_Limpa'], y=df_in[col_in_br], name="Instalações", marker_color='#2ca02c'))
-        fig_balanco.add_trace(go.Bar(x=df_in['Data_Limpa'], y=-df_out[col_out_br], name="Desinstalações", marker_color='#d62728'))
-        fig_balanco.update_layout(barmode='relative', title="Balanço Diário", template="plotly_white")
-        st.plotly_chart(fig_balanco, use_container_width=True)
+        try:
+            df_in['Data_Limpa'] = df_in['Data'].str.split(',').str[0]
+            fig_balanco = go.Figure()
+            fig_balanco.add_trace(go.Bar(x=df_in['Data_Limpa'], y=df_in[col_in_br], name="Instalações", marker_color='#2ca02c'))
+            fig_balanco.add_trace(go.Bar(x=df_in['Data_Limpa'], y=-df_out[col_out_br], name="Desinstalações", marker_color='#d62728'))
+            fig_balanco.update_layout(barmode='relative', title="Balanço Diário", template="plotly_white")
+            st.plotly_chart(fig_balanco, use_container_width=True)
+        except: pass
 
 # ==========================================
 # TAB 3: MONETIZAÇÃO (ADMOB)
@@ -366,8 +334,7 @@ with tab3:
         ca, cb = st.columns(2)
         ca.info(f"**Total de Impressões:** {df_ad['Impressões'].sum():,.0f}")
         cb.info(f"**eCPM Médio:** ${df_ad['eCPM observado (USD)'].mean():.2f}")
-    else:
-        st.warning("⚠️ O relatório do AdMob não pôde ser renderizado financeiramente.")
+    else: st.warning("⚠️ O relatório do AdMob não pôde ser renderizado financeiramente.")
 
 # ==========================================
 # TAB 4: E-COMMERCE AFILIADO (SHOPEE)
@@ -395,16 +362,11 @@ with tab4:
             st.dataframe(top_produtos, column_config={"Comissao_Total": st.column_config.NumberColumn("Sua Comissão (R$)", format="R$ %.2f")}, use_container_width=True, hide_index=True)
             
         with col_s2:
-            st.subheader("🛍️ Status dos Pedidos")
-            status_df = df_sh['Status do Pedido'].value_counts().reset_index()
-            status_df.columns = ['Status', 'Total']
-            fig_status = px.pie(status_df, names='Status', values='Total', hole=0.4, color='Status', color_discrete_map={'Concluído':'#2ca02c', 'Cancelado':'#d62728', 'Pendente':'#ff7f0e'})
-            st.plotly_chart(fig_status, use_container_width=True)
-            
-        st.markdown("---")
-        st.subheader("📈 Evolução Diária de Comissões")
-        comissao_diaria = df_concluidos.groupby('Data')['Comissão líquida do afiliado(R$)'].sum().reset_index()
-        if not comissao_diaria.empty:
-            fig_shopee = px.line(comissao_diaria, x='Data', y='Comissão líquida do afiliado(R$)', markers=True, template="plotly_white")
-            fig_shopee.update_traces(line_color="#ff7f0e")
-            st.plotly_chart(fig_shopee, use_container_width=True)
+            st.subheader("📈 Evolução Diária de Comissões")
+            try:
+                comissao_diaria = df_concluidos.groupby('Data')['Comissão líquida do afiliado(R$)'].sum().reset_index()
+                if not comissao_diaria.empty:
+                    fig_shopee = px.line(comissao_diaria, x='Data', y='Comissão líquida do afiliado(R$)', markers=True, template="plotly_white")
+                    fig_shopee.update_traces(line_color="#ff7f0e")
+                    st.plotly_chart(fig_shopee, use_container_width=True)
+            except: pass
