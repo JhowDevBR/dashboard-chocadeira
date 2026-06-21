@@ -224,7 +224,7 @@ with tab1:
             with st.spinner('A IA está a analisar os seus dados cruzados de Aplicação, Play Store, AdMob e Shopee...'):
                 try:
                     genai.configure(api_key=api_key_gemini)
-                    model = genai.GenerativeModel('gemini-1.5-flash')
+                    model = genai.GenerativeModel('gemini-pro')
                     prompt = f"""Atue como um Analista de Dados e Especialista em Crescimento de Aplicativos.
                     Analise os dados reais da aplicação 'Chocadeira Eficiente' (nicho de agricultura/pecuária):
                     {pacote_dados_ia}
