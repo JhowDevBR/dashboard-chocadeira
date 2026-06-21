@@ -224,7 +224,18 @@ with tab1:
             with st.spinner('A IA está a analisar os seus dados cruzados de Aplicação, Play Store, AdMob e Shopee...'):
                 try:
                     genai.configure(api_key=api_key_gemini)
-                    model = genai.GenerativeModel('gemini-pro')
+                    # Busca automaticamente qual modelo está liberado para a sua chave
+                    modelo_liberado = None
+                    for m in genai.list_models():
+                        if 'generateContent' in m.supported_generation_methods:
+                            modelo_liberado = m.name
+                            break
+                    
+                    if not modelo_liberado:
+                        st.error("A sua chave API é válida, mas não tem permissão ativa para modelos de texto. Verifique no Google AI Studio.")
+                        st.stop()
+                        
+                    model = genai.GenerativeModel(modelo_liberado)
                     prompt = f"""Atue como um Analista de Dados e Especialista em Crescimento de Aplicativos.
                     Analise os dados reais da aplicação 'Chocadeira Eficiente' (nicho de agricultura/pecuária):
                     {pacote_dados_ia}
