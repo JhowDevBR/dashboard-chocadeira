@@ -5,7 +5,7 @@ import glob
 import plotly.express as px
 import plotly.graph_objects as go
 import time
-import google.generativeai as genai
+from google import genai # <--- NOVA BIBLIOTECA OFICIAL DO GOOGLE
 
 # --- CONFIGURAÇÃO DE RESPONSIVIDADE TOTAL ---
 st.set_page_config(page_title="Centro de Comando - Chocadeira", layout="wide", page_icon="📈")
@@ -141,7 +141,7 @@ else:
 
 # --- BARRA LATERAL ---
 st.sidebar.image("https://cdn-icons-png.flaticon.com/512/1004/1004186.png", width=60)
-if st.sidebar.button("🔄 Atualizar Fontes", use_container_width=True): st.rerun()
+if st.sidebar.button("🔄 Atualizar Fontes", width="stretch"): st.rerun()
 
 st.sidebar.markdown("---")
 st.sidebar.title("🧠 Inteligência Artificial")
@@ -161,7 +161,7 @@ if estados: df_app = df_app[df_app['region_name'].isin(estados)]
 tab1, tab2, tab3, tab4 = st.tabs(["🐣 Produto & Engajamento", "🚀 Aquisição & Play Store", "💰 Monetização (AdMob)", "🛍️ E-commerce (Shopee)"])
 
 # ==========================================
-# TAB 1: PRODUTO E ENGAJAMENTO (COM MAPA)
+# TAB 1: PRODUTO E ENGAJAMENTO
 # ==========================================
 with tab1:
     st.header("Análise Avançada de Produto e Comportamento")
@@ -183,59 +183,52 @@ with tab1:
     kpi4.metric("Duração Sessão", f"{media_sessao:.1f} min" if pd.notna(media_sessao) else "N/A")
     kpi5.metric("Pico de Acesso", f"{hora_pico}h")
 
-    # --- IA DO GOOGLE ---
+    # --- NOVA API DO GOOGLE GEMINI ---
     st.markdown("---")
-    if st.button("🧠 Gerar Relatório de Decisões com IA", type="primary"):
+    if st.button("🧠 Gerar Relatório de Decisões com IA", type="primary", width="stretch"):
         if not api_key_gemini:
             st.error("⚠️ Insira a Chave API na barra lateral primeiro.")
         else:
             with st.spinner('A IA está a analisar...'):
                 try:
-                    genai.configure(api_key=api_key_gemini)
-                    modelo_liberado = None
-                    for m in genai.list_models():
-                        if 'generateContent' in m.supported_generation_methods:
-                            modelo_liberado = m.name; break
-                    if not modelo_liberado: st.error("Sem modelos ativos na chave.")
-                    else:
-                        model = genai.GenerativeModel(modelo_liberado)
-                        rec_admob = dados["admob"]['Ganhos estimados (USD)'].sum() if not dados["admob"].empty else 0
-                        rec_shopee = dados["shopee"]['Comissão líquida do afiliado(R$)'].sum() if not dados["shopee"].empty else 0
-                        prompt = f"Analise dados do app Chocadeira Eficiente: {total_users} users, Eclosão {media_eclosao:.1f}%, Sessão {media_sessao:.1f}m, Premium {taxa_prem:.1f}%, AdMob ${rec_admob}, Shopee R${rec_shopee}. Dê um diagnóstico e uma ação prática em Markdown."
-                        st.markdown(model.generate_content(prompt).text)
+                    client = genai.Client(api_key=api_key_gemini)
+                    rec_admob = dados["admob"]['Ganhos estimados (USD)'].sum() if not dados["admob"].empty else 0
+                    rec_shopee = dados["shopee"]['Comissão líquida do afiliado(R$)'].sum() if not dados["shopee"].empty else 0
+                    prompt = f"Analise dados do app Chocadeira Eficiente: {total_users} users, Eclosão {media_eclosao:.1f}%, Sessão {media_sessao:.1f}m, Premium {taxa_prem:.1f}%, AdMob ${rec_admob}, Shopee R${rec_shopee}. Dê um diagnóstico e uma ação prática em Markdown."
+                    
+                    response = client.models.generate_content(
+                        model='gemini-2.5-flash', # Usa o modelo mais leve e robusto da nova biblioteca
+                        contents=prompt
+                    )
+                    st.markdown(response.text)
                 except Exception as e: st.error(f"Erro IA: {e}")
 
     st.markdown("---")
     
-    # --- NOVO: MAPA INTERATIVO DO BRASIL ---
+    # --- MAPA INTERATIVO CORRIGIDO (scatter_map) ---
     st.subheader("🗺️ Densidade Geográfica de Utilização")
     try:
-        # Prepara os dados agrupando por Estado
         df_mapa = df_app['region_name'].dropna().value_counts().reset_index()
         df_mapa.columns = ['Estado', 'Acessos']
-        
-        # Faz o match com o dicionário de Lat/Lon (Formatando a string para evitar erros de maiúsculas)
         df_mapa['Estado_Limpo'] = df_mapa['Estado'].str.strip().str.title()
         df_mapa['Lat'] = df_mapa['Estado_Limpo'].map(lambda x: COORDENADAS_ESTADOS.get(x, [None, None])[0])
         df_mapa['Lon'] = df_mapa['Estado_Limpo'].map(lambda x: COORDENADAS_ESTADOS.get(x, [None, None])[1])
-        
-        # Remove estados não encontrados ou fora do Brasil
         df_mapa_limpo = df_mapa.dropna(subset=['Lat', 'Lon'])
         
         if not df_mapa_limpo.empty:
-            fig_mapa = px.scatter_mapbox(
+            fig_mapa = px.scatter_map( # Comando Plotly atualizado!
                 df_mapa_limpo, 
                 lat="Lat", lon="Lon", 
                 size="Acessos", color="Acessos",
                 hover_name="Estado", 
                 hover_data={"Lat":False, "Lon":False, "Acessos":True},
                 color_continuous_scale=px.colors.sequential.Plasma, 
-                size_max=50, # Tamanho máximo da bolha
-                zoom=3, center={"lat": -15.78, "lon": -47.92}, # Focado no centro do Brasil
-                mapbox_style="carto-positron" # Estilo de mapa limpo que não exige chaves de acesso
+                size_max=50, 
+                zoom=3, center={"lat": -15.78, "lon": -47.92}, 
+                map_style="carto-positron" # Parâmetro atualizado!
             )
             fig_mapa.update_layout(margin={"r":0,"t":0,"l":0,"b":0})
-            st.plotly_chart(fig_mapa, use_container_width=True)
+            st.plotly_chart(fig_mapa, width="stretch") # Streamlit container width atualizado!
         else:
             st.info("Nenhum estado válido encontrado para desenhar o mapa.")
     except Exception as e:
@@ -251,14 +244,14 @@ with tab1:
         df_fin = df_app[df_app['event_name'] == 'finalizou_incubacao'].dropna(subset=['taxa_eclosao'])
         medias = df_fin.groupby('chocadeira_limpa_ranking')['taxa_eclosao'].mean().reset_index()
         medias.columns = ['Modelo Específico', 'Eclosão (%)']
-        st.dataframe(pd.merge(contagem, medias, on='Modelo Específico', how='left').head(15), column_config={"Eclosão (%)": st.column_config.NumberColumn(format="%.1f%%")}, use_container_width=True, hide_index=True)
+        st.dataframe(pd.merge(contagem, medias, on='Modelo Específico', how='left').head(15), column_config={"Eclosão (%)": st.column_config.NumberColumn(format="%.1f%%")}, width="stretch", hide_index=True)
         
     with col_rank2:
         st.subheader("📊 Participação")
         try:
             df_choc_pie = df_app[df_app['chocadeira_padronizada'] != 'Não Informada']['chocadeira_padronizada'].value_counts().reset_index()
             df_choc_pie.columns = ['Modelo', 'Quantidade']
-            st.plotly_chart(px.pie(df_choc_pie, names='Modelo', values='Quantidade', hole=0.4), use_container_width=True)
+            st.plotly_chart(px.pie(df_choc_pie, names='Modelo', values='Quantidade', hole=0.4), width="stretch")
         except: pass
 
     st.markdown("---")
@@ -267,13 +260,13 @@ with tab1:
         st.markdown("**📅 Evolução de Acessos**")
         try:
             df_t = df_app.groupby(['data_curta']).size().reset_index(name='Eventos')
-            st.plotly_chart(px.line(df_t, x='data_curta', y='Eventos', markers=True), use_container_width=True)
+            st.plotly_chart(px.line(df_t, x='data_curta', y='Eventos', markers=True), width="stretch")
         except: pass
     with col_g2:
         st.markdown("**🔥 Mapa de Calor Semanal**")
         try:
             df_h = df_app.groupby(['dia_semana', 'hora']).size().reset_index(name='Acessos')
-            st.plotly_chart(px.density_heatmap(df_h, x="hora", y="dia_semana", z="Acessos", text_auto=True), use_container_width=True)
+            st.plotly_chart(px.density_heatmap(df_h, x="hora", y="dia_semana", z="Acessos", text_auto=True), width="stretch")
         except: pass
 
 # ==========================================
@@ -296,7 +289,7 @@ with tab2:
             fig_balanco.add_trace(go.Bar(x=df_in['Dia'], y=df_in[c_br], name="Instalações", marker_color='green'))
             fig_balanco.add_trace(go.Bar(x=df_in['Dia'], y=-df_out[c_out_br], name="Desinstalações", marker_color='red'))
             fig_balanco.update_layout(barmode='relative', title="Balanço Diário")
-            st.plotly_chart(fig_balanco, use_container_width=True)
+            st.plotly_chart(fig_balanco, width="stretch")
         except: pass
 
 # ==========================================
@@ -328,8 +321,8 @@ with tab4:
         c_g1, c_g2 = st.columns([2, 1])
         with c_g1:
             st.subheader("🔥 Top Produtos")
-            st.dataframe(df_c.groupby('Nome do Item').agg(Vendas=('Qtd', 'sum'), Comissao=('Comissão líquida do afiliado(R$)', 'sum')).reset_index().sort_values(by='Vendas', ascending=False).head(10), use_container_width=True)
+            st.dataframe(df_c.groupby('Nome do Item').agg(Vendas=('Qtd', 'sum'), Comissao=('Comissão líquida do afiliado(R$)', 'sum')).reset_index().sort_values(by='Vendas', ascending=False).head(10), width="stretch", hide_index=True)
         with c_g2:
             st.subheader("🛍️ Status")
-            st.plotly_chart(px.pie(df_sh['Status do Pedido'].value_counts().reset_index(), names='Status do Pedido', values='count', hole=0.4), use_container_width=True)
+            st.plotly_chart(px.pie(df_sh['Status do Pedido'].value_counts().reset_index(), names='Status do Pedido', values='count', hole=0.4), width="stretch")
     else: st.warning("⚠️ Relatório Shopee não encontrado.")
