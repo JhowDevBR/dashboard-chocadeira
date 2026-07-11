@@ -5,7 +5,7 @@ import glob
 import plotly.express as px
 import plotly.graph_objects as go
 import time
-from google import genai # <--- NOVA BIBLIOTECA OFICIAL DO GOOGLE
+import requests
 
 # --- CONFIGURAÇÃO DE RESPONSIVIDADE TOTAL ---
 st.set_page_config(page_title="Centro de Comando - Chocadeira", layout="wide", page_icon="📈")
@@ -184,26 +184,39 @@ with tab1:
     kpi5.metric("Pico de Acesso", f"{hora_pico}h")
 
     # --- NOVA API DO GOOGLE GEMINI ---
+    
+    # --- NOVA API REST (À PROVA DE FALHAS/SEGMENTATION FAULT) ---
     st.markdown("---")
     if st.button("🧠 Gerar Relatório de Decisões com IA", type="primary", width="stretch"):
         if not api_key_gemini:
             st.error("⚠️ Insira a Chave API na barra lateral primeiro.")
         else:
-            with st.spinner('A IA está a analisar...'):
+            with st.spinner('A IA está a analisar os seus dados em segurança...'):
                 try:
-                    client = genai.Client(api_key=api_key_gemini)
+                    # 1. Prepara os dados
                     rec_admob = dados["admob"]['Ganhos estimados (USD)'].sum() if not dados["admob"].empty else 0
                     rec_shopee = dados["shopee"]['Comissão líquida do afiliado(R$)'].sum() if not dados["shopee"].empty else 0
-                    prompt = f"Analise dados do app Chocadeira Eficiente: {total_users} users, Eclosão {media_eclosao:.1f}%, Sessão {media_sessao:.1f}m, Premium {taxa_prem:.1f}%, AdMob ${rec_admob}, Shopee R${rec_shopee}. Dê um diagnóstico e uma ação prática em Markdown."
+                    prompt = f"Atue como um Especialista de Dados. Analise os dados do app Chocadeira Eficiente: {total_users} users, Eclosão {media_eclosao:.1f}%, Sessão {media_sessao:.1f}m, Premium {taxa_prem:.1f}%, AdMob ${rec_admob:.2f}, Shopee R${rec_shopee:.2f}. Escreva um diagnóstico e uma ação prática em Markdown."
                     
-                    response = client.models.generate_content(
-                        model='gemini-2.5-flash', # Usa o modelo mais leve e robusto da nova biblioteca
-                        contents=prompt
-                    )
-                    st.markdown(response.text)
-                except Exception as e: st.error(f"Erro IA: {e}")
+                    # 2. Faz a chamada HTTP direta e leve ao servidor do Google
+                    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key_gemini}"
+                    headers = {'Content-Type': 'application/json'}
+                    payload = {"contents": [{"parts": [{"text": prompt}]}]}
+                    
+                    resposta = requests.post(url, headers=headers, json=payload)
+                    
+                    # 3. Processa a resposta
+                    if resposta.status_code == 200:
+                        resultado_json = resposta.json()
+                        texto_ia = resultado_json['candidates'][0]['content']['parts'][0]['text']
+                        st.markdown(texto_ia)
+                    else:
+                        st.error(f"O Google recusou a conexão. Código de erro: {resposta.status_code}")
+                        with st.expander("Ver detalhes do erro técnico"):
+                            st.write(resposta.text)
 
-    st.markdown("---")
+                except Exception as e: 
+                    st.error(f"Erro na comunicação web: {e}")
     
     # --- MAPA INTERATIVO CORRIGIDO (scatter_map) ---
     st.subheader("🗺️ Densidade Geográfica de Utilização")
